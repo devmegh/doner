@@ -1,0 +1,317 @@
+Donation App with React, Firebase, and Next.js
+We design a full-featured donation platform where users (donors and recipients) can register, manage profiles and campaigns, and give/receive donations of money or goods. The frontend uses React.js with Tailwind CSS, hosted on Firebase Hosting​
+firebase.google.com
+. The backend is Firebase: Firestore (NoSQL DB), Cloud Functions (Node.js), Firebase Auth, Storage, and FCM. A separate Next.js admin app (with protected routes) manages users, donations, campaigns, and content reports.
+Frontend (React/Tailwind): Client app handles browsing campaigns, donating, user profiles, chat, and user history. Fully responsive and WCAG-compliant (semantic HTML, alt-tags, keyboard navigation).
+Backend (Firebase): Firestore holds users, campaigns, donations, chats. Cloud Functions handle payments, recurring schedules, badge logic, notifications. Storage holds user-uploaded images (profiles, donation receipts). FCM for push notifications. Stripe (or PayPal) is integrated via functions for secure payments​
+matellio.com
+.
+Admin Panel (Next.js): A separate app (hosted e.g. on Vercel or Firebase Hosting with SSR) for administrative tasks. It uses Firebase Auth (with custom claims/roles) to restrict access.
+Throughout, we enable mobile responsiveness, error handling, loading states, accessibility (ARIA roles, contrasts), offline support (Firestore persistence), and security (Firestore/Storage rules, HTTPS, environment secrets). We gamify donations with badges and leaderboards to boost engagement​
+thedonationapp.com
+​
+matellio.com
+.
+UI Design & Wireframes
+The app has intuitive screens for donors, recipients, and organizers. Below are sample UI mockups: 
+
+Figure: Example mobile UI displaying fundraising campaigns with product images, progress bars, and "Fund" buttons. This design is described as a modern simple crowdfunding/charity app​
+dribbble.com
+. Campaigns can have types (education, health, goods, etc.), targets, and progress indicators. 
+
+Figure: Example screens: (left) Donor profile with donation stats and subscriptions, (center) a live stream page with donation/chat features, and (right) an Explore page with categories. Users can see their balance, donate live, and chat​
+dribbble.com
+. These wireframes illustrate key workflows: browsing campaigns, donating, messaging, and profile management. Wireframes include login/signup pages, campaign list and details, donation form, user profile, chat interface, and leaderboard/dashboard. Accessibility is built in (ARIA labels, tab order).
+Folder Structure
+A monorepo (or top-level project) might look like:
+bash
+Copy
+Edit
+/donation-app
+├── firebase.json          # Firebase config (hosting, rewrites)
+├── .firebaserc           # Firebase project aliases
+├── firestore.rules       # Firestore security rules
+├── storage.rules         # Storage security rules
+├── functions/            # Firebase Cloud Functions (Node.js)
+│   ├── index.js          # main functions file
+│   ├── package.json      
+│   └── ...              
+├── main-app/             # React frontend (Firebase Hosting)
+│   ├── public/
+│   ├── src/
+│   │   ├── components/   # React components (Auth, Chat, CampaignCard, etc.)
+│   │   ├── pages/        # React Router pages (Home, Profile, Campaign)
+│   │   ├── firebase.js   # Firebase initialization
+│   │   ├── App.jsx       
+│   │   └── ...
+│   ├── tailwind.config.js
+│   └── package.json
+└── admin-app/            # Next.js admin panel
+    ├── pages/
+    │   ├── dashboard.jsx
+    │   ├── users.jsx
+    │   ├── campaigns.jsx
+    │   └── ...          
+    ├── components/
+    ├── utils/
+    └── package.json
+firebase.json configures Hosting for main-app/ (and optionally for admin-app/ via rewrites or separate deploy).
+Cloud Functions handles API calls (Stripe webhooks, donation processing, badge logic, push notifications, etc.) and is initialized with firebase init functions.
+Main-App uses Firebase Auth (Google/Facebook/Email) and Firestore. Components handle sign-in flows, forms, and state.
+Admin-App uses Next.js (React) with Firebase Auth (and possibly next-firebase-auth or custom middleware) to secure admin routes.
+Authentication
+We use Firebase Authentication for all login types. In Firebase console, enable Google, Facebook and Email/Password providers. Then in React we implement:
+js
+Copy
+Edit
+import { getAuth, signInWithPopup, GoogleAuthProvider, FacebookAuthProvider, createUserWithEmailAndPassword } from "firebase/auth";
+const auth = getAuth(firebaseApp);
+
+// Google sign-in:
+const googleProvider = new GoogleAuthProvider();
+signInWithPopup(auth, googleProvider)
+  .then((result) => { /* user signed in */ })
+  .catch(err => { /* handle error */ });
+
+// Facebook sign-in:
+const facebookProvider = new FacebookAuthProvider();
+signInWithPopup(auth, facebookProvider)
+  .then(/*...*/)
+  .catch(/*...*/);
+
+// Email/password sign-up:
+createUserWithEmailAndPassword(auth, email, password)
+  .then(userCredential => { /*...*/ })
+  .catch(/*...*/);
+After login, we create or update a user profile document in Firestore (users/{uid}) with fields like { name, email, photoURL, role: 'donor'|'recipient'|'org', badges: [], donationCount: 0, totalDonated: 0 }. Profile images can be uploaded to Firebase Storage (user images bucket) and the download URL saved in the profile. We ensure secure rules so only the user (and admins) can edit their profile. Snippet: Firebase Auth Google login​
+firebase.google.com
+. This handles the social OAuth flows via Firebase SDK, simplifying the process​
+firebase.google.com
+.
+User Profiles & Badges
+Profiles distinguish donors vs. recipients (or organizations). Each user has a profile with personal info, avatar, role and activity stats. We store metadata like totalDonations, donationHistory, and an array of earned badges. Badge/achievement logic: On significant donation events, a Cloud Function triggers to update stats and award badges. For example, on each new donation (Firestore onCreate trigger on donations/), we increment the donor’s donationCount, sum amountDonated, and if thresholds (1st donation, 10th donation, top donor of month, etc.) are met, append a badge string to user.badges. This gamification rewards milestone achievements and boosts engagement​
+thedonationapp.com
+​
+matellio.com
+.
+js
+Copy
+Edit
+// functions/index.js (Node.js Cloud Function)
+exports.onDonationCreated = functions.firestore
+  .document('donations/{donationId}')
+  .onCreate(async (snap, context) => {
+    const donation = snap.data();
+    const donorId = donation.donorId;
+    const db = admin.firestore();
+    const userRef = db.collection('users').doc(donorId);
+
+    await db.runTransaction(async (t) => {
+      const doc = await t.get(userRef);
+      if (!doc.exists) return;
+      let { donationCount = 0, totalDonated = 0, badges = [] } = doc.data();
+      donationCount += 1;
+      totalDonated += donation.amount;
+      const newBadges = [...badges];
+      // Example badge logic:
+      if (donationCount === 1) newBadges.push('First Donation');
+      if (donationCount === 10) newBadges.push('Top Supporter');
+      // Update user doc
+      t.update(userRef, { donationCount, totalDonated, badges: newBadges });
+    });
+  });
+This pattern (Firestore trigger) enables real-time badge assignment without extra client code. Achievements (e.g. “First Donation”, “Lifetime Supporter”) motivate users and can feed into leaderboards​
+thedonationapp.com
+​
+matellio.com
+. We also show donors their impact via reports (e.g. “Your donations funded X meals”) in their profile using stored campaign outcomes.
+Campaign Management & Donations
+Campaigns: Users/organizations can create campaigns (e.g. “School Supplies for 50 Kids”) stored in Firestore (campaigns/{id}) with fields: title, description, category (Education/Health/Env/Items/etc.), goal, raisedAmount, creatorId, isActive, image URL, dates, and type (fundraising or item collection). Items (Clothes, Books, Electronics) can be collected by listing them as separate donation types, or by a campaign’s category. Donations: When a donor submits a donation, we record it in Firestore (donations/{id}) with { donorId, campaignId, type, amount, timestamp, message, isAnonymous }. The type can be “Money”, “Clothes”, “Food”, etc. If paying money, we process via Stripe or PayPal. For goods, we note quantities/description.
+Payment Integration: We use Stripe Checkout or API in a Cloud Function. For example, the front end calls a Firebase Function /createPaymentIntent to create a Stripe PaymentIntent, then confirm it in React. Stripe’s Billing APIs make recurring subscriptions easy​
+stripe.com
+. Alternatively, PayPal’s Donate button or SDK can be used. Secure keys (Stripe secret) are in Functions only. Snippet: Processing a donation with Stripe (Node function):
+js
+Copy
+Edit
+const stripe = require('stripe')(functions.config().stripe.secret);
+exports.createPayment = functions.https.onCall(async (data, context) => {
+  const { amount, currency, donorId } = data;
+  const paymentIntent = await stripe.paymentIntents.create({
+    amount: amount * 100, currency,
+    metadata: { donorId }
+  });
+  return { clientSecret: paymentIntent.client_secret };
+});
+Recurring Donations: We allow donors to schedule monthly/quarterly/yearly donations. This can be implemented via Stripe Subscriptions, or by recording a “recurring” flag in Firestore and using Cloud Scheduler to charge each period. Stripe Billing supports flexible recurring plans​
+stripe.com
+.
+Donation Tracking: After payment, we update the campaign’s raisedAmount (via transaction or function) and mark the donation complete. We can then automatically generate receipts (e.g. PDF via a service or email) for tax purposes.
+Privacy: Donors may choose to appear anonymously (we simply avoid displaying their name on campaign pages if isAnonymous is true).
+We implement a search/filter UI so users can browse campaigns by category, keyword, or donation type (e.g. “Education” or “Food Drive”). This uses Firestore queries (indexed) for performance. Key features cited: Donation apps must include secure payment gateways, recurring options, history tracking, and receipts​
+matellio.com
+. We incorporate all: e.g. Stripe for secure credit/debit processing, UI to set up automated donations, a history page showing past contributions with receipts, and social sharing prompts.
+Real-time Chat
+Donors and recipients (or donors and organizers) can chat in real-time. We implement a chat module using Firestore or Realtime Database. For example, create a chats/{chatId}/messages subcollection. In React, use onSnapshot listeners to fetch messages live and display them with minimal latency. Example message doc: { senderId, text, timestamp }.
+js
+Copy
+Edit
+// In React: listen to chat updates
+useEffect(() => {
+  const unsub = onSnapshot(collection(db, 'chats', chatId, 'messages'), (snapshot) => {
+    setMessages(snapshot.docs.map(doc => doc.data()));
+  });
+  return () => unsub();
+}, [chatId]);
+Messages instantly update on all devices. This leverages Firebase’s real-time sync, requiring no manual polling. We also implement presence/typing indicators for better UX. (For heavy chat loads, one could integrate a dedicated service, but Firestore suffices for typical usage.)
+Notifications
+We use Firebase Cloud Messaging (FCM) to send push notifications (mobile/web) for important events. For example:
+After a donation is processed, send a thank-you notification to the donor (“Thanks for donating $X!”).
+When a campaign they follow hits milestones, notify all supporters.
+Leaderboard updates (e.g. “You are now #3 donor this week!”).
+FCM allows sending messages from Cloud Functions​
+firebase.google.com
+. A function can be triggered on database events (e.g. donation creation) to call the FCM API:
+js
+Copy
+Edit
+const admin = require('firebase-admin');
+exports.sendThankYou = functions.firestore
+  .document('donations/{donationId}')
+  .onCreate(async (snap, ctx) => {
+    const donation = snap.data();
+    const token = (await admin.firestore().doc(`users/${donation.donorId}`).get()).data().fcmToken;
+    if (!token) return;
+    return admin.messaging().send({
+      token,
+      notification: {
+        title: 'Thank You for Donating!',
+        body: `Your gift of $${donation.amount} has been received.`
+      }
+    });
+  });
+FCM is cross-platform and designed for engagement​
+firebase.google.com
+. We ensure users grant notification permission in app settings. For in-app alerts (non-push), we can also use Firebase’s in-app messaging or simply reflect events on the UI.
+Badges, Leaderboards & Engagement
+To motivate donors, we include gamified features. As donors reach milestones, they earn badges (“First Donation”, “Top Donor of Month”, “Lifetime Supporter”). These badges are displayed on profiles. We also optionally maintain leaderboards (weekly/monthly) of top donors. Users can opt-in to appear on public leaderboards or donate anonymously​
+thedonationapp.com
+. The Donation App industry notes that “leaderboards [and] badges encourage continued engagement”​
+thedonationapp.com
+​
+matellio.com
+. A sample real-time leaderboard can be generated by querying Firestore for sum(amount) per user over the period, sorting descending. For performance, we might pre-compute rankings with a scheduled function. We always respect opt-out anonymity.
+Donation History & Receipts
+Each user can view their donation history (list of past donations with dates, amounts, and campaigns). This is a Firestore query on the donations collection filtered by donorId. We implement pagination or infinite scroll for performance. On each entry, we include a link or PDF receipt for tax purposes. Receipts can be auto-generated (Cloud Function triggers PDF creation) or simply emailed. Providing clear history and tax receipts increases trust and transparency.
+Admin Panel (Next.js)
+Admins and organization managers need a management interface. We build a Next.js app as an admin panel with protected routes (e.g. /admin). We use server-side rendering for fast initial load, and integrate Firebase Auth (via cookies or NextAuth with Firebase) to secure pages. Key admin features:
+User management: list users, change roles (donor/recipient/org/admin), deactivate accounts.
+Campaign moderation: view/edit/delete campaigns, approve new campaigns.
+Donation oversight: view all donations, flag/report suspicious.
+Content moderation: handle reported messages or content, ensure compliance.
+Analytics: dashboards showing totals, trends, etc.
+Configuration: global settings (available donation types, badge rules).
+This panel uses the same Firebase backend. Admin API calls can use Firebase’s Admin SDK via Next.js API routes or admin-only Cloud Functions. Each admin page checks context.userRole === 'admin' before rendering.
+Search, Filter & Accessibility
+Users can search campaigns by keywords or filter by category/type. We use Firestore indexes (composite queries) for efficient search (e.g. where('category','==','Health'), or simple string matching on titles). For full-text search, we could integrate Algolia or Elastic. We ensure accessibility (WCAG): high contrast colors, readable fonts, alt text on images, and screen-reader friendly navigation. Tailwind utilities (e.g. focus rings) help meet contrast ratios. Forms have labels and error messages. We test keyboard tab order and ARIA roles on dialogs. Accessibility libraries or linters are used during development.
+Offline Support
+We enable offline data persistence so users can view their donation history and campaign data while offline​
+firebase.google.com
+. In React, we call:
+js
+Copy
+Edit
+import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore";
+const db = getFirestore(firebaseApp);
+enableIndexedDbPersistence(db).catch(err => console.warn('Offline persistence failed', err));
+This caches Firestore data the user has seen, so pages still render without network​
+firebase.google.com
+. Donations submitted offline can queue (with the new Firestore offline SDK or custom IndexedDB). When back online, queued donations sync and Cloud Functions process them. Additionally, we use a service worker (via create-react-app or Workbox) to cache the app shell (JavaScript/CSS) for instant loads. This turns the app into a Progressive Web App (PWA) on supported devices.
+Security & Privacy
+All sensitive operations are secured. We use Firebase Security Rules to restrict Firestore/Storage: for example, users can only write to their own profile (match /users/{uid} allow write if request.auth.uid == uid), and only upload images within allowed types/sizes. Cloud Functions run with admin credentials, but we validate inputs to prevent injection or abuse. We use HTTPS everywhere (Firebase Hosting has automatic SSL​
+firebase.google.com
+). Payment info (Stripe) is handled server-side; no payment credentials are stored in our database. Sensitive keys (Stripe secret, API tokens) reside only in Cloud Functions environment variables (set via firebase functions:config:set). We also enable Firebase App Check for anti-abuse (optional). Regular security audits and monitoring (Firebase Security Rules simulator, logs) are part of maintenance.
+Deployment Steps (Firebase)
+Initialize Firebase: Run firebase login, then firebase init. Select Hosting (for main-app), Functions, Firestore, Auth, Storage, Firemessaging as needed. Connect to or create a Firebase project.
+Configure Services:
+In Firebase console, set up Authentication providers (Google, Facebook, Email) and authorized domains.
+Configure Firestore (mode, indices) and Storage rules.
+Get FCM setup (generate keys if needed).
+Create Stripe/PayPal accounts and set credentials in firebase functions:config:set stripe.secret="...".
+Build Frontend: In main-app, run npm run build (or yarn build). Ensure build/ (or dist/) is targeted by Firebase Hosting.
+Deploy: Use firebase deploy --only hosting,functions,firestore,storage. This pushes the React app to Firebase Hosting (CDN-enabled)​
+firebase.google.com
+, deploys Cloud Functions, and applies Firestore rules/indexes.
+Verify: Check the live URL (project.web.app), test login flows, donate to a test campaign, and confirm Cloud Functions logs for expected behavior.
+Admin Panel: Deploy admin-app/ separately (it could be on Vercel or as a second Firebase Hosting site). If using Firebase Hosting, add a rewrite in firebase.json to serve /admin/** from the Next.js build output (or deploy as its own site).
+Key Code Snippets
+Authentication (React):
+jsx
+Copy
+Edit
+import { getAuth, signInWithPopup, GoogleAuthProvider } from "firebase/auth";
+const auth = getAuth();
+const provider = new GoogleAuthProvider();
+signInWithPopup(auth, provider)
+  .then(result => { /* user is signed in */ })
+  .catch(error => console.error(error));
+Create Donation (Cloud Function):
+js
+Copy
+Edit
+exports.createDonation = functions.https.onCall(async (data, context) => {
+  const { campaignId, donorId, amount, type } = data;
+  const db = admin.firestore();
+  // Record donation in Firestore
+  await db.collection('donations').add({ campaignId, donorId, amount, type, timestamp: admin.firestore.FieldValue.serverTimestamp() });
+  // Update campaign’s raisedAmount
+  const campRef = db.collection('campaigns').doc(campaignId);
+  await db.runTransaction(async t => {
+    const snap = await t.get(campRef);
+    if (!snap.exists) return;
+    const newRaised = (snap.data().raisedAmount || 0) + amount;
+    t.update(campRef, { raisedAmount: newRaised });
+  });
+  return { success: true };
+});
+Badge Assignment (Cloud Function): As shown above, trigger on donations to update users/{uid} with new badges based on donation count.
+Push Notification (Cloud Function):
+js
+Copy
+Edit
+exports.sendDonationNotification = functions.firestore
+  .document('donations/{donationId}')
+  .onCreate(async (snap) => {
+    const donation = snap.data();
+    const donorToken = (await admin.firestore().doc(`users/${donation.donorId}`).get()).data().fcmToken;
+    if (!donorToken) return;
+    await admin.messaging().send({
+      token: donorToken,
+      notification: {
+        title: 'Donation Received',
+        body: `Thank you for your donation of $${donation.amount}!`
+      }
+    });
+  });
+Enable Offline Persistence (React):
+js
+Copy
+Edit
+import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore";
+const db = getFirestore();
+enableIndexedDbPersistence(db).catch(err => console.warn('Persistence failed', err));
+Each snippet above highlights core functionality: user sign-in, donation recording, badge updating, and notifications.
+This design yields a production-ready, scalable donation platform. We leverage Firebase’s managed services for auth, database, storage, and messaging​
+firebase.google.com
+​
+firebase.google.com
+. The React/Tailwind UI is responsive and accessible. Code is structured for maintainability, and deployment is handled by the Firebase CLI with global CDN support​
+firebase.google.com
+. With Stripe/PayPal integration, admins controlling content via the Next.js panel, and features like recurring gifts and impact reports, the app meets all listed requirements. Sources: Official Firebase and Stripe documentation and case studies were used to guide best practices​
+firebase.google.com
+​
+matellio.com
+​
+firebase.google.com
+​
+thedonationapp.com
+. These ensure secure payments, rich engagement (badges, leaderboards), and reliable hosting.
