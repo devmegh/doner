@@ -1,8 +1,10 @@
 import { 
   User, InsertUser, Campaign, InsertCampaign, 
   Donation, InsertDonation, Category, InsertCategory,
-  LoginCredentials
+  LoginCredentials, users, campaigns, donations, categories
 } from "@shared/schema";
+import { db } from "./db";
+import { eq, and, desc } from "drizzle-orm";
 
 // Interface defining all storage operations
 export interface IStorage {
@@ -37,183 +39,184 @@ export interface IStorage {
   authenticate(credentials: LoginCredentials): Promise<User | undefined>;
 }
 
-// In-memory implementation of the storage interface
-export class MemStorage implements IStorage {
-  private users: Map<number, User>;
-  private campaigns: Map<number, Campaign>;
-  private donations: Map<number, Donation>;
-  private categories: Map<number, Category>;
-  private userIdCounter: number;
-  private campaignIdCounter: number;
-  private donationIdCounter: number;
-  private categoryIdCounter: number;
-
-  constructor() {
-    this.users = new Map();
-    this.campaigns = new Map();
-    this.donations = new Map();
-    this.categories = new Map();
-    this.userIdCounter = 1;
-    this.campaignIdCounter = 1;
-    this.donationIdCounter = 1;
-    this.categoryIdCounter = 1;
-    
-    // Initialize with some default categories
-    this.initializeCategories();
-  }
-
-  private initializeCategories() {
-    const defaultCategories: InsertCategory[] = [
-      { 
-        name: "Education", 
-        iconName: "graduation-cap", 
-        backgroundColor: "bg-primary-100", 
-        textColor: "text-primary-500" 
-      },
-      { 
-        name: "Healthcare", 
-        iconName: "heart", 
-        backgroundColor: "bg-green-100", 
-        textColor: "text-green-500" 
-      },
-      { 
-        name: "Community", 
-        iconName: "users", 
-        backgroundColor: "bg-blue-100", 
-        textColor: "text-blue-500" 
-      },
-      { 
-        name: "Disaster Relief", 
-        iconName: "gift", 
-        backgroundColor: "bg-yellow-100", 
-        textColor: "text-yellow-500" 
-      },
-      { 
-        name: "Arts & Culture", 
-        iconName: "paint-brush", 
-        backgroundColor: "bg-purple-100", 
-        textColor: "text-purple-500" 
-      },
-      { 
-        name: "Animal Welfare", 
-        iconName: "heart", 
-        backgroundColor: "bg-pink-100", 
-        textColor: "text-pink-500" 
+// Database implementation of the storage interface
+export class DatabaseStorage implements IStorage {
+  // Initialize database with seed data
+  async initializeDatabase() {
+    try {
+      // Check if categories exist, if not, create them
+      const existingCategories = await db.select().from(categories);
+      
+      if (existingCategories.length === 0) {
+        console.log('Initializing database with default categories');
+        const defaultCategories: InsertCategory[] = [
+          { 
+            name: "Education", 
+            iconName: "graduation-cap", 
+            backgroundColor: "bg-primary-100", 
+            textColor: "text-primary-500" 
+          },
+          { 
+            name: "Healthcare", 
+            iconName: "heart", 
+            backgroundColor: "bg-green-100", 
+            textColor: "text-green-500" 
+          },
+          { 
+            name: "Community", 
+            iconName: "users", 
+            backgroundColor: "bg-blue-100", 
+            textColor: "text-blue-500" 
+          },
+          { 
+            name: "Disaster Relief", 
+            iconName: "gift", 
+            backgroundColor: "bg-yellow-100", 
+            textColor: "text-yellow-500" 
+          },
+          { 
+            name: "Arts & Culture", 
+            iconName: "paint-brush", 
+            backgroundColor: "bg-purple-100", 
+            textColor: "text-purple-500" 
+          },
+          { 
+            name: "Animal Welfare", 
+            iconName: "heart", 
+            backgroundColor: "bg-pink-100", 
+            textColor: "text-pink-500" 
+          }
+        ];
+        
+        for (const category of defaultCategories) {
+          await this.createCategory(category);
+        }
       }
-    ];
-
-    defaultCategories.forEach(category => {
-      this.createCategory(category);
-    });
+    } catch (error) {
+      console.error('Error initializing database:', error);
+    }
   }
 
   // User operations
   async getUser(id: number): Promise<User | undefined> {
-    return this.users.get(id);
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user;
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username.toLowerCase() === username.toLowerCase()
-    );
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.username, username));
+    return user;
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const id = this.userIdCounter++;
-    const now = new Date();
-    const user: User = { 
-      ...insertUser, 
-      id, 
-      donationCount: 0, 
-      totalDonated: 0, 
-      createdAt: now
-    };
-    this.users.set(id, user);
+    const [user] = await db
+      .insert(users)
+      .values({
+        ...insertUser,
+        donationCount: 0,
+        totalDonated: 0
+      })
+      .returning();
     return user;
   }
 
   async updateUser(id: number, userData: Partial<User>): Promise<User | undefined> {
-    const existingUser = await this.getUser(id);
-    if (!existingUser) return undefined;
-    
-    const updatedUser = { ...existingUser, ...userData };
-    this.users.set(id, updatedUser);
+    const [updatedUser] = await db
+      .update(users)
+      .set(userData)
+      .where(eq(users.id, id))
+      .returning();
     return updatedUser;
   }
 
   // Campaign operations
   async getCampaign(id: number): Promise<Campaign | undefined> {
-    return this.campaigns.get(id);
+    const [campaign] = await db
+      .select()
+      .from(campaigns)
+      .where(eq(campaigns.id, id));
+    return campaign;
   }
 
   async getAllCampaigns(): Promise<Campaign[]> {
-    return Array.from(this.campaigns.values());
+    return await db.select().from(campaigns);
   }
 
   async getCampaignsByCategory(category: string): Promise<Campaign[]> {
-    return Array.from(this.campaigns.values()).filter(
-      (campaign) => campaign.category === category
-    );
+    return await db
+      .select()
+      .from(campaigns)
+      .where(eq(campaigns.category, category));
   }
 
   async getCampaignsByCreator(creatorId: number): Promise<Campaign[]> {
-    return Array.from(this.campaigns.values()).filter(
-      (campaign) => campaign.creatorId === creatorId
-    );
+    return await db
+      .select()
+      .from(campaigns)
+      .where(eq(campaigns.creatorId, creatorId));
   }
 
   async createCampaign(insertCampaign: InsertCampaign): Promise<Campaign> {
-    const id = this.campaignIdCounter++;
-    const now = new Date();
-    const campaign: Campaign = {
-      ...insertCampaign,
-      id,
-      raisedAmount: 0,
-      createdAt: now
-    };
-    this.campaigns.set(id, campaign);
+    const [campaign] = await db
+      .insert(campaigns)
+      .values({
+        ...insertCampaign,
+        raisedAmount: 0
+      })
+      .returning();
     return campaign;
   }
 
   async updateCampaign(id: number, campaignData: Partial<Campaign>): Promise<Campaign | undefined> {
-    const existingCampaign = await this.getCampaign(id);
-    if (!existingCampaign) return undefined;
-    
-    const updatedCampaign = { ...existingCampaign, ...campaignData };
-    this.campaigns.set(id, updatedCampaign);
+    const [updatedCampaign] = await db
+      .update(campaigns)
+      .set(campaignData)
+      .where(eq(campaigns.id, id))
+      .returning();
     return updatedCampaign;
   }
 
   async deleteCampaign(id: number): Promise<boolean> {
-    return this.campaigns.delete(id);
+    const result = await db
+      .delete(campaigns)
+      .where(eq(campaigns.id, id));
+    return result.rowCount > 0;
   }
 
   // Donation operations
   async getDonation(id: number): Promise<Donation | undefined> {
-    return this.donations.get(id);
+    const [donation] = await db
+      .select()
+      .from(donations)
+      .where(eq(donations.id, id));
+    return donation;
   }
 
   async getDonationsByCampaign(campaignId: number): Promise<Donation[]> {
-    return Array.from(this.donations.values()).filter(
-      (donation) => donation.campaignId === campaignId
-    );
+    return await db
+      .select()
+      .from(donations)
+      .where(eq(donations.campaignId, campaignId))
+      .orderBy(desc(donations.createdAt));
   }
 
   async getDonationsByUser(userId: number): Promise<Donation[]> {
-    return Array.from(this.donations.values()).filter(
-      (donation) => donation.donorId === userId
-    );
+    return await db
+      .select()
+      .from(donations)
+      .where(eq(donations.donorId, userId))
+      .orderBy(desc(donations.createdAt));
   }
 
   async createDonation(insertDonation: InsertDonation): Promise<Donation> {
-    const id = this.donationIdCounter++;
-    const now = new Date();
-    const donation: Donation = {
-      ...insertDonation,
-      id,
-      createdAt: now
-    };
-    this.donations.set(id, donation);
+    // Insert the donation
+    const [donation] = await db
+      .insert(donations)
+      .values(insertDonation)
+      .returning();
     
     // Update campaign raised amount
     const campaign = await this.getCampaign(donation.campaignId);
@@ -238,43 +241,56 @@ export class MemStorage implements IStorage {
 
   // Category operations
   async getCategory(id: number): Promise<Category | undefined> {
-    return this.categories.get(id);
+    const [category] = await db
+      .select()
+      .from(categories)
+      .where(eq(categories.id, id));
+    return category;
   }
 
   async getCategoryByName(name: string): Promise<Category | undefined> {
-    return Array.from(this.categories.values()).find(
-      (category) => category.name.toLowerCase() === name.toLowerCase()
-    );
+    const [category] = await db
+      .select()
+      .from(categories)
+      .where(eq(categories.name, name));
+    return category;
   }
 
   async getAllCategories(): Promise<Category[]> {
-    return Array.from(this.categories.values());
+    return await db.select().from(categories);
   }
 
   async createCategory(insertCategory: InsertCategory): Promise<Category> {
-    const id = this.categoryIdCounter++;
-    const now = new Date();
-    const category: Category = {
-      ...insertCategory,
-      id,
-      createdAt: now
-    };
-    this.categories.set(id, category);
+    const [category] = await db
+      .insert(categories)
+      .values(insertCategory)
+      .returning();
     return category;
   }
 
   // Authentication
   async authenticate(credentials: LoginCredentials): Promise<User | undefined> {
-    const user = await this.getUserByUsername(credentials.username);
-    if (!user) return undefined;
+    const { username, password } = credentials;
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(and(
+        eq(users.username, username),
+        eq(users.password, password)
+      ));
     
-    // Simple password check (in a real app would use bcrypt)
-    if (user.password === credentials.password) {
-      return user;
-    }
-    
-    return undefined;
+    return user;
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
+
+// Initialize the database with seed data
+(async () => {
+  try {
+    await storage.initializeDatabase();
+    console.log('Database initialized with seed data if needed');
+  } catch (error) {
+    console.error('Error initializing database:', error);
+  }
+})();
