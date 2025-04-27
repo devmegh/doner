@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 
 export default function Campaigns() {
-  const [selectedCategory, setSelectedCategory] = useState<string>("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [sortOption, setSortOption] = useState<string>("newest");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [visibleCount, setVisibleCount] = useState<number>(6);
@@ -26,7 +26,7 @@ export default function Campaigns() {
   const filteredAndSortedCampaigns = campaigns
     ? campaigns
         .filter(campaign => 
-          (selectedCategory === "" || campaign.category === selectedCategory) &&
+          (selectedCategory === "all" || campaign.category === selectedCategory) &&
           (searchQuery === "" || 
             campaign.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
             campaign.description.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -124,7 +124,7 @@ export default function Campaigns() {
               variant="outline"
               onClick={() => {
                 setSearchQuery("");
-                setSelectedCategory("");
+                setSelectedCategory("all");
               }}
             >
               View All Campaigns

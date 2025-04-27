@@ -28,12 +28,12 @@ export function CategoryCard({ category }: CategoryCardProps) {
   
   return (
     <Link href={`/campaigns?category=${encodeURIComponent(category.name)}`}>
-      <a className="category-item flex flex-col items-center p-4 rounded-lg hover:bg-gray-50 transition-colors">
+      <div className="category-item flex flex-col items-center p-4 rounded-lg hover:bg-gray-50 transition-colors cursor-pointer">
         <div className={`w-12 h-12 ${category.backgroundColor} rounded-full flex items-center justify-center mb-3`}>
           <IconComponent className={`h-6 w-6 ${category.textColor}`} />
         </div>
         <span className="font-medium text-center">{category.name}</span>
-      </a>
+      </div>
     </Link>
   );
 }

@@ -2,6 +2,7 @@ import { X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
+  DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { LoginForm } from "./login-form";
@@ -37,9 +38,23 @@ export function AuthModal({
   const switchToLogin = () => onViewChange("login");
   const switchToSignup = () => onViewChange("signup");
 
+  // Determine the title based on the current view
+  const dialogTitle = view === "login" ? "Log In" : "Sign Up";
+
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-md p-0 gap-0 overflow-hidden">
+      <DialogContent 
+        className="sm:max-w-md p-0 gap-0 overflow-hidden"
+        aria-describedby="auth-dialog-description"
+      >
+        <div className="sr-only" id="auth-dialog-description">
+          {view === "login" 
+            ? "Log in to your account to access all features." 
+            : "Create a new account to get started."}
+        </div>
+        
+        <DialogTitle className="sr-only">{dialogTitle}</DialogTitle>
+        
         <Tabs 
           value={view} 
           onValueChange={(value) => onViewChange(value as "login" | "signup")}
